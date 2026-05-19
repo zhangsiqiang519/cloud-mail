@@ -38,17 +38,17 @@ jobs:
       - name: 🚚 检出代码仓库 / Checkout repository
         uses: actions/checkout@v4
 
+      - name: ⚙ 设置 Node.js / Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "pnpm"
+          cache-dependency-path: "./mail-worker/pnpm-lock.yaml"
+
       - name: ⚙ 设置 pnpm / Set up pnpm
         uses: pnpm/action-setup@v4.1.0
         with:
           version: latest
-
-      - name: ⚙ 设置 Node.js / Set up Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: "20"
-          cache: "pnpm"
-          cache-dependency-path: "./mail-worker/pnpm-lock.yaml"
 
       - name: 📦 安装依赖 / Install dependencies
         run: pnpm install --frozen-lockfile
@@ -198,60 +198,3 @@ jobs:
             D1_ID=$(echo "$DB_LIST" | jq -r ".[] | select(.name == \"$NAME\") | .uuid")
           fi
           
-          sed -i "s|\${D1_DATABASE_ID}|$D1_ID|g" "$CONFIG_FILE"
-          echo "✅ Setup completed."
-
-      - name: 🚀 开始部署 / Start deployment
-        id: deploy
-        working-directory: ./mail-worker
-        run: |
-          echo "🚀 Starting deployment..."
-          pnpm wrangler deploy -c wrangler-action.toml 2>&1 \
-            | tee deploy.log \
-            | grep -v "https://.*\.workers\.dev" \
-            | sed -E 's/env\.domain .*/env.domain (***)/' \
-            || true
-          
-          DEPLOY_EXIT_CODE=${PIPESTATUS[0]}
-          if [ $DEPLOY_EXIT_CODE -ne 0 ]; then
-            exit 1
-          fi
-          
-          WORKER_URL=$(grep -o "https://.*\.workers\.dev" deploy.log || echo "")
-          
-          if [ -n "$WORKER_URL" ]; then
-            echo "::add-mask::$WORKER_URL"
-          fi
-          
-          echo "worker_url=$WORKER_URL" >> $GITHUB_OUTPUT
-          echo "✅ Setup completed."
-
-      - name: ♻️ 初始化数据库 / Initialize database
-        run: |
-          echo "🛠️ Starting database initialization..."
-          sleep 15
-          
-          WORKER_URL="${CUSTOM_DOMAIN:+https://$CUSTOM_DOMAIN}"
-          WORKER_URL="${WORKER_URL:-${{ steps.deploy.outputs.worker_url }}}"
-          
-          if [ -z "$WORKER_URL" ]; then
-            echo "❌ Preview URL not available. Please set CUSTOM_DOMAIN."
-            exit 1
-          fi
-          
-          HTTP_CODE=$(curl -sL -w "%{http_code}" -o response.txt "$WORKER_URL/api/init/${JWT_SECRET}")
-          RESPONSE_BODY=$(cat response.txt)
-
-          if [ "$RESPONSE_BODY" = "success" ]; then
-            echo "✅ Setup completed."
-          else
-            echo "❌ Failed. HTTP: $HTTP_CODE, Response: $RESPONSE_BODY"
-            exit 1
-          fi
-
-      - name: 🗑️ 删除运行记录 / Delete workflow runs
-        uses: GitRML/delete-workflow-runs@main
-        continue-on-error: true
-        with:
-          retain_days: '1'
-          keep_minimum_runs: '0'
